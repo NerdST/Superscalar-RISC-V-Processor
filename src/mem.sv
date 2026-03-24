@@ -30,12 +30,12 @@ end
     readDataM = 32'b0;
 
     if (memAccessM) begin
-      readDataM = RAM[dataAddrM[31:2]];
+      readDataM = RAM[dataAddrM[13:2]];
     end else begin
-      instrF = RAM[pcAddrF[31:2]];
+      instrF = RAM[pcAddrF[13:2]];
     end
   end
 
   always_ff @(posedge clk)
-    if (memWriteM) RAM[dataAddrM[31:2]] <= writeDataM;
+    if (memWriteM) RAM[dataAddrM[13:2]] <= writeDataM;
 endmodule

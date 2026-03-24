@@ -1,41 +1,79 @@
 module testbench();
 
-  logic        clk;
-  logic        reset;
+  logic clk;
+  logic reset;
 
-  logic [31:0] WriteData, DataAdr;
+  logic [31:0] WriteData;
+  logic [31:0] DataAdr;
   logic        MemWrite;
-  logic [31:0] RAM [4095:0];
-  logic [31:0] PCF, InstrF;
-  
-  // instantiate device to be tested
-  top dut(clk, reset, WriteData, DataAdr, MemWrite);
+  int unsigned cycle_count;
+  int unsigned max_cycles;
+  string test_name;
+  int debug_en;
 
-  // Expose unified memory contents as a single global for waveform debug.
-  always_comb RAM = dut.mem.RAM;
-  always_comb PCF = dut.PCF;
-  always_comb InstrF = dut.InstrF;
-  
-  // initialize test
-  initial
-    begin
-      reset <= 1; # 22; reset <= 0;
+  top dut(
+      .clk(clk),
+      .reset(reset),
+      .WriteDataM(WriteData),
+      .DataAdrM(DataAdr),
+      .MemWriteM(MemWrite)
+  );
+
+  initial begin
+    if (!$value$plusargs("MAXCYC=%d", max_cycles))
+      max_cycles = 3000;
+    if (!$value$plusargs("TEST=%s", test_name))
+      test_name = "unnamed";
+    if (!$value$plusargs("DBG=%d", debug_en))
+      debug_en = 0;
+
+    $display("[tb] test=%s max_cycles=%0d", test_name, max_cycles);
+    reset = 1'b1;
+    #22;
+    reset = 1'b0;
+  end
+
+  always begin
+    clk = 1'b1;
+    #5;
+    clk = 1'b0;
+    #5;
+  end
+
+  initial cycle_count = 0;
+  always @(posedge clk)
+    if (!reset)
+      cycle_count <= cycle_count + 1;
+
+  always @(negedge clk) begin
+    if (debug_en != 0 && !reset && cycle_count < 180) begin
+      $display("DBG c=%0d PC=%08x i0=%08x i1=%08x d0=%0d d1=%0d cdb=%0d t=%0d cv=%0d ct=%0d cs=%0d sd=%0d mw=%0d adr=%0d wd=%0d",
+               cycle_count,
+               dut.riscvprocessor.PCF,
+               dut.riscvprocessor.iq0,
+               dut.riscvprocessor.iq1,
+               dut.riscvprocessor.dispatch0,
+               dut.riscvprocessor.dispatch1,
+               dut.riscvprocessor.cdbv,
+               dut.riscvprocessor.cdbt,
+               dut.riscvprocessor.commitv,
+               dut.riscvprocessor.commitTag,
+               dut.riscvprocessor.commitStore,
+               dut.riscvprocessor.storeDoneV,
+               MemWrite,
+               DataAdr,
+               WriteData);
     end
 
-  // generate clock to sequence tests
-  always
-    begin
-      clk <= 1; # 5; clk <= 0; # 5;
+    if (!reset && cycle_count > max_cycles) begin
+      $display("TIMEOUT: test=%s cycles=%0d", test_name, cycle_count);
+      $fatal(1);
     end
 
-  // check results
-  always @(negedge clk)
-    begin
-      if (MemWrite) begin
-        if (DataAdr === 32'd100) begin
-          $display("FINAL_SIGNATURE: DataAdr=%0d WriteData=%0d", DataAdr, WriteData);
-          $stop;
-        end
-      end
+    if (MemWrite && (DataAdr === 32'd100)) begin
+      $display("FINAL_SIGNATURE: DataAdr=%0d WriteData=%0d", DataAdr, WriteData);
+      $stop;
     end
+  end
+
 endmodule
