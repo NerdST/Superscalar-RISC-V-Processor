@@ -12,7 +12,7 @@ module alu(input  logic [31:0] a, b,
   assign isAddSub = ~alucontrol[2] & ~alucontrol[1] |
                     ~alucontrol[1] & alucontrol[0];
 
-  always_comb
+  always_comb begin
     case (alucontrol)
       3'b000:  result = sum;         // add
       3'b001:  result = sum;         // subtract
@@ -24,6 +24,7 @@ module alu(input  logic [31:0] a, b,
       3'b111:  result = a >> b[4:0]; // srl
       default: result = 32'bx;
     endcase
+  end
 
   assign zero = (result == 32'b0);
   assign v = ~(alucontrol[0] ^ a[31] ^ b[31]) & (a[31] ^ sum[31]) & isAddSub;

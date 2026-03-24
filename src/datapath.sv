@@ -1,4 +1,5 @@
-module datapath(input  logic        clk, reset,
+module datapath(input  logic        clk,
+                input  logic        reset,
                 input  logic [31:0] InstrF,
                 output logic [31:0] PCF,
                 output logic [31:0] ALUResultM,
@@ -7,196 +8,414 @@ module datapath(input  logic        clk, reset,
                 output logic        MemWrite,
                 output logic        MemReadM);
 
-  // Fetch stage signals
-  logic [31:0] PCPlus4F, PCFa, PCTargetE;
-  logic        StallF, StallD, FlushD, FlushE;
-  logic        PCSrcE;
-  
-  // Decode stage signals
-  logic [31:0] InstrD, PCD, PCPlus4D;
-  logic [31:0] RD1D, RD2D, ImmExtD;
-  logic [31:0] RD1D_raw, RD2D_raw;
-  logic [4:0]  Rs1D, Rs2D, RdD;
-  logic        RegWriteD, MemWriteD, JumpD, BranchD;
-  logic [1:0]  ResultSrcD, ImmSrcD;
-  logic [2:0]  ALUControlD;
-    logic [2:0]  BranchTypeD;
-  logic        ALUSrcD;
-  logic [1:0]  ALUOpD;
-  
-  // Control signals from controller
-  logic [6:0]  OpD;
-  logic [2:0]  Funct3D;
-  logic        Funct7b5D;
-  
-  // Execute stage signals
-  logic [31:0] RD1E, RD2E, PCE, ImmExtE, PCPlus4E;
-  logic [31:0] SrcAE, SrcBE, WriteDataE, ALUResultE;
-  logic [31:0] SrcAE_Fwd, SrcBE_Fwd;  // Intermediate signals after forwarding
-  logic [4:0]  Rs1E, Rs2E, RdE;
-  logic        RegWriteE, MemWriteE, JumpE, BranchE, ZeroE;
-  logic [1:0]  ResultSrcE, ForwardAE, ForwardBE;
-  logic [2:0]  ALUControlE;
-    logic [2:0]  BranchTypeE;
-  logic        ALUSrcE;
-  logic [31:0] SL12E;
-    logic        branchEqE, branchLtSignedE, branchLtUnsignedE, branchTakenE;
-  
-  // Memory stage signals
-  logic [31:0] PCPlus4M, ReadDataMReg, SL12M;
-  logic [31:0] ResultMForward;
-  logic [4:0]  RdM;
-  logic        RegWriteM;
-  logic [1:0]  ResultSrcM;
-  logic        MemAccessM;
-  
-  // Writeback stage signals
-  logic [31:0] ALUResultW, ReadDataW, PCPlus4W, ResultW, SL12W;
-  logic [4:0]  RdW;
-  logic        RegWriteW;
-  logic [1:0]  ResultSrcW;
-  
-  // Hazard detection signals
-  logic [1:0]  ForwardAE_sig, ForwardBE_sig;
-  
-  // ========== FETCH STAGE ==========
-  // PC mux and register
-  mux2 #(32) pcmux(PCPlus4F, PCTargetE, PCSrcE, PCFa);
-  flopenr #(32) pcreg(clk, reset, ~StallF, PCFa, PCF);
-  adder pcadd4(PCF, 32'd4, PCPlus4F);
-  
-  // Instruction comes from memory (input port InstrF)
-  
-  // ========== FETCH/DECODE PIPELINE REGISTER ==========
-  flopenrc #(32) instrdreg(clk, reset, FlushD, ~StallD, InstrF, InstrD);
-  flopenrc #(32) pcdreg(clk, reset, FlushD, ~StallD, PCF, PCD);
-  flopenrc #(32) pcplus4dreg(clk, reset, FlushD, ~StallD, PCPlus4F, PCPlus4D);
-  
-  // ========== DECODE STAGE ==========
-  // Extract register addresses
-  assign Rs1D = InstrD[19:15];
-  assign Rs2D = InstrD[24:20];
-  assign RdD = InstrD[11:7];
-  assign OpD = InstrD[6:0];
-  assign Funct3D = InstrD[14:12];
-  assign Funct7b5D = InstrD[30];
-    assign BranchTypeD = Funct3D;
-  
-  // Instantiate controller in Decode stage
-  controller ctrl(OpD, Funct3D, Funct7b5D,
-                  RegWriteD, ResultSrcD, MemWriteD, JumpD, 
-                  BranchD, ALUControlD, ALUSrcD, ImmSrcD);
-  
-  // Register file
-  regfile rf(clk, RegWriteW, Rs1D, Rs2D, RdW, ResultW, RD1D_raw, RD2D_raw);
+  localparam int NROB = 8;
+  localparam int TAGW = $clog2(NROB);
 
-  // Decode-stage bypass for same-cycle W->D RAW hazards.
-  assign RD1D = (RegWriteW && (RdW != 5'b0) && (RdW == Rs1D)) ? ResultW : RD1D_raw;
-  assign RD2D = (RegWriteW && (RdW != 5'b0) && (RdW == Rs2D)) ? ResultW : RD2D_raw;
-  
-  // Extend immediate
-  extend ext(InstrD[31:7], ImmSrcD, ImmExtD);
-  
-  // Shift left 12 for LUI
-  logic [31:0] SL12D;
-  assign SL12D = {InstrD[31:12], 12'b0};
-  
-  // ========== DECODE/EXECUTE PIPELINE REGISTER ==========
-  floprc #(32) rd1ereg(clk, reset, FlushE, RD1D, RD1E);
-  floprc #(32) rd2ereg(clk, reset, FlushE, RD2D, RD2E);
-  floprc #(32) pcereg(clk, reset, FlushE, PCD, PCE);
-  floprc #(32) immextereg(clk, reset, FlushE, ImmExtD, ImmExtE);
-  floprc #(32) pcplus4ereg(clk, reset, FlushE, PCPlus4D, PCPlus4E);
-  floprc #(5) rs1ereg(clk, reset, FlushE, Rs1D, Rs1E);
-  floprc #(5) rs2ereg(clk, reset, FlushE, Rs2D, Rs2E);
-  floprc #(5) rdereg(clk, reset, FlushE, RdD, RdE);
-  
-  // Control signal pipeline registers D->E
-  floprc #(1) regwriteereg(clk, reset, FlushE, RegWriteD, RegWriteE);
-  floprc #(2) resultsrcereg(clk, reset, FlushE, ResultSrcD, ResultSrcE);
-  floprc #(1) memwriteereg(clk, reset, FlushE, MemWriteD, MemWriteE);
-  floprc #(3) alucontrolereg(clk, reset, FlushE, ALUControlD, ALUControlE);
-    floprc #(3) branchtypeereg(clk, reset, FlushE, BranchTypeD, BranchTypeE);
-  floprc #(1) alusrcerreg(clk, reset, FlushE, ALUSrcD, ALUSrcE);
-  floprc #(1) jumpereg(clk, reset, FlushE, JumpD, JumpE);
-  floprc #(1) branchereg(clk, reset, FlushE, BranchD, BranchE);
-  floprc #(32) sl12ereg(clk, reset, FlushE, SL12D, SL12E);
-  
-  // ========== EXECUTE STAGE ==========
-  // M-stage forwarding must use the value that will be written back, not ALUResult only.
-  // This is required for forwarding results of lw, jal (PC+4), and lui.
-  assign ResultMForward = (ResultSrcM == 2'b00) ? ALUResultM :
-                          (ResultSrcM == 2'b01) ? ReadDataM :
-                          (ResultSrcM == 2'b10) ? PCPlus4M :
-                                                 SL12M;
+  localparam logic [1:0] K_ADD = 2'd0;
+  localparam logic [1:0] K_MUL = 2'd1;
+  localparam logic [1:0] K_LS  = 2'd2;
 
-  // Forwarding muxes
-  mux3 #(32) forwardaemux(RD1E, ResultW, ResultMForward, ForwardAE, SrcAE_Fwd);
-  mux3 #(32) forwardbemux(RD2E, ResultW, ResultMForward, ForwardBE, SrcBE_Fwd);
-  
-  // ALU source muxes
-  assign SrcAE = SrcAE_Fwd;  // ALUSrcE is don't care for jal/lui
-  mux2 #(32) srcbmux(SrcBE_Fwd, ImmExtE, ALUSrcE, SrcBE);
-  assign WriteDataE = SrcBE_Fwd;  // WriteData is the forwarded value before immediate selection
-  
-  // ALU
-  alu alu(SrcAE, SrcBE, ALUControlE, ALUResultE, ZeroE);
-  
-  // PC target calculation
-  adder pcaddbranch(PCE, ImmExtE, PCTargetE);
-  
-    // Branch decision for full RV32I branch family:
-    // beq, bne, blt, bge, bltu, bgeu
-    assign branchEqE = (SrcAE_Fwd == SrcBE_Fwd);
-    assign branchLtSignedE = ($signed(SrcAE_Fwd) < $signed(SrcBE_Fwd));
-    assign branchLtUnsignedE = (SrcAE_Fwd < SrcBE_Fwd);
+  localparam logic [2:0] OP_ADDI = 3'd2;
+  localparam logic [2:0] OP_LW   = 3'd4;
+  localparam logic [2:0] OP_SW   = 3'd5;
 
-    always_comb begin
-        case (BranchTypeE)
-            3'b000: branchTakenE = branchEqE;             // beq
-            3'b001: branchTakenE = ~branchEqE;            // bne
-            3'b100: branchTakenE = branchLtSignedE;       // blt
-            3'b101: branchTakenE = ~branchLtSignedE;      // bge
-            3'b110: branchTakenE = branchLtUnsignedE;     // bltu
-            3'b111: branchTakenE = ~branchLtUnsignedE;    // bgeu
-            default: branchTakenE = 1'b0;
-        endcase
+  logic _unusedInstrF;
+
+  logic [31:0] areg[31:0];
+  int i;
+
+  logic [31:0] iq0, iq1, iqpc0;
+  logic        iqv0, iqv1;
+  logic [1:0]  iqpop;
+
+  logic [2:0] op0, op1;
+  logic [1:0] k0, k1;
+  logic [4:0] rs10, rs20, rd0;
+  logic [4:0] rs11, rs21, rd1;
+  logic [31:0] imm0, imm1;
+  logic valid0, valid1, regw0, regw1;
+  logic nop0, nop1;
+
+  logic q10v, q20v, q11v, q21v;
+  logic [TAGW-1:0] q10t, q20t, q11t, q21t;
+
+  logic robAlloc0, robAlloc1;
+  logic robAlloc0Store, robAlloc1Store;
+  logic [TAGW-1:0] robTag0, robTag1;
+  logic [TAGW-1:0] robTag1Eff;
+  logic robCanAlloc0, robCanAlloc1;
+
+  logic commitv, commitStore;
+  logic [4:0] commitRd;
+  logic [31:0] commitVal, commitAddr, commitData;
+  logic [TAGW-1:0] commitTag;
+
+  logic rename0, rename1;
+
+  logic addFull, mulFull, lsFull;
+  logic dispatch0, dispatch1;
+
+  logic addDisp, addDispImm;
+  logic [TAGW-1:0] addDispDest;
+  logic [31:0] addDispVj, addDispVk, addDispImmVal;
+  logic addDispQjv, addDispQkv;
+  logic [TAGW-1:0] addDispQj, addDispQk;
+
+  logic mulDisp;
+  logic [TAGW-1:0] mulDispDest;
+  logic [31:0] mulDispVj, mulDispVk;
+  logic mulDispQjv, mulDispQkv;
+  logic [TAGW-1:0] mulDispQj, mulDispQk;
+
+  logic lsDisp, lsDispStore;
+  logic [TAGW-1:0] lsDispDest;
+  logic [31:0] lsDispVj, lsDispVk, lsDispImmVal;
+  logic lsDispQjv, lsDispQkv;
+  logic [TAGW-1:0] lsDispQj, lsDispQk;
+
+  logic addIssueV, addIssueStore, addIssueImm;
+  logic [TAGW-1:0] addIssueDest;
+  logic [31:0] addIssueA, addIssueB, addIssueImmVal;
+
+  logic mulIssueV, mulIssueStore, mulIssueImm;
+  logic [TAGW-1:0] mulIssueDest;
+  logic [31:0] mulIssueA, mulIssueB, mulIssueImmVal;
+
+  logic lsIssueV, lsIssueStore, lsIssueImm;
+  logic [TAGW-1:0] lsIssueDest;
+  logic [31:0] lsIssueA, lsIssueB, lsIssueImmVal;
+
+  logic [31:0] addRes, mulRes;
+
+  logic addDoneV, mulDoneV;
+  logic [TAGW-1:0] addDoneTag, mulDoneTag;
+  logic [31:0] addDoneRes, mulDoneRes;
+
+  logic loadDoneV, storeDoneV;
+  logic [TAGW-1:0] loadDoneTag, storeDoneTag;
+  logic [31:0] loadAddr, storeDoneAddr, storeDoneData;
+
+  logic cdbv;
+  logic [TAGW-1:0] cdbt;
+  logic [31:0] cdbr;
+
+  logic s0qjv, s0qkv;
+  logic [TAGW-1:0] s0qj, s0qk;
+  logic [31:0] s0vj, s0vk;
+
+  logic s1qjv, s1qkv;
+  logic [TAGW-1:0] s1qj, s1qk;
+  logic [31:0] s1vj, s1vk;
+
+  iqueue iq(clk, reset, iqpop, iq0, iq1, iqv0, iqv1, iqpc0);
+
+  tdecode d0(iq0, op0, k0, rs10, rs20, rd0, imm0, valid0, regw0, nop0);
+  tdecode d1(iq1, op1, k1, rs11, rs21, rd1, imm1, valid1, regw1, nop1);
+
+  rat #(.TAGW(TAGW)) r0(
+    clk, reset,
+    rs10, rs20, rs11, rs21,
+    q10v, q10t, q20v, q20t, q11v, q11t, q21v, q21t,
+    rename0, rd0, robTag0,
+    rename1, rd1, robTag1Eff,
+    commitv && !commitStore, commitRd, commitTag
+  );
+
+  rob #(.NROB(NROB), .TAGW(TAGW)) rb0(
+    clk, reset,
+    robAlloc0, robAlloc0Store, rd0,
+    robAlloc1, robAlloc1Store, rd1,
+    robTag0, robTag1, robCanAlloc0, robCanAlloc1,
+    cdbv, cdbt, cdbr,
+    storeDoneV, storeDoneTag, storeDoneAddr, storeDoneData,
+    commitv, commitStore, commitRd, commitVal, commitTag, commitAddr, commitData
+  );
+
+  rs #(.DEPTH(4), .TAGW(TAGW)) rsAdd(
+    clk, reset,
+    addDisp, 1'b0, addDispImm, addDispDest,
+    addDispVj, addDispVk, addDispImmVal,
+    addDispQjv, addDispQj, addDispQkv, addDispQk,
+    addFull,
+    cdbv, cdbt, cdbr,
+    addIssueV, addIssueStore, addIssueImm, addIssueDest,
+    addIssueA, addIssueB, addIssueImmVal
+  );
+
+  rs #(.DEPTH(3), .TAGW(TAGW)) rsMul(
+    clk, reset,
+    mulDisp, 1'b0, 1'b0, mulDispDest,
+    mulDispVj, mulDispVk, 32'b0,
+    mulDispQjv, mulDispQj, mulDispQkv, mulDispQk,
+    mulFull,
+    cdbv, cdbt, cdbr,
+    mulIssueV, mulIssueStore, mulIssueImm, mulIssueDest,
+    mulIssueA, mulIssueB, mulIssueImmVal
+  );
+
+  rs #(.DEPTH(3), .TAGW(TAGW), .IN_ORDER(1'b1)) rsLs(
+    clk, reset,
+    lsDisp, lsDispStore, 1'b1, lsDispDest,
+    lsDispVj, lsDispVk, lsDispImmVal,
+    lsDispQjv, lsDispQj, lsDispQkv, lsDispQk,
+    lsFull,
+    cdbv, cdbt, cdbr,
+    lsIssueV, lsIssueStore, lsIssueImm, lsIssueDest,
+    lsIssueA, lsIssueB, lsIssueImmVal
+  );
+
+  assign addRes = addIssueImm ? (addIssueA + addIssueImmVal) : (addIssueA + addIssueB);
+  assign mulRes = mulIssueA * mulIssueB;
+
+  fu_pipe #(.LAT(4), .TAGW(TAGW)) fadd(clk, reset, addIssueV, addIssueDest, addRes, addDoneV, addDoneTag, addDoneRes);
+  fu_pipe #(.LAT(6), .TAGW(TAGW)) fmul(clk, reset, mulIssueV, mulIssueDest, mulRes, mulDoneV, mulDoneTag, mulDoneRes);
+
+  fu_ls #(.TAGW(TAGW)) fls(
+    clk, reset,
+    lsIssueV, lsIssueStore, lsIssueDest,
+    lsIssueA, lsIssueImmVal, lsIssueB,
+    loadDoneV, loadDoneTag, loadAddr,
+    storeDoneV, storeDoneTag, storeDoneAddr, storeDoneData
+  );
+
+  cdb #(.TAGW(TAGW)) cb0(
+    addDoneV, addDoneTag, addDoneRes,
+    mulDoneV, mulDoneTag, mulDoneRes,
+    loadDoneV, loadDoneTag, ReadDataM,
+    cdbv, cdbt, cdbr
+  );
+
+  assign _unusedInstrF = InstrF[0];
+
+  always_comb begin
+    PCF = iqpc0;
+
+    if ((rs10 != 5'b0) && q10v) begin
+      s0qjv = 1'b1;
+      s0qj = q10t;
+      s0vj = 32'b0;
+    end else begin
+      s0qjv = 1'b0;
+      s0qj = '0;
+      s0vj = areg[rs10];
     end
 
-    assign PCSrcE = (BranchE & branchTakenE) | JumpE;
-  
-  // ========== EXECUTE/MEMORY PIPELINE REGISTER ==========
-  flopr #(32) aluresultmreg(clk, reset, ALUResultE, ALUResultM);
-  flopr #(32) writedatamreg(clk, reset, WriteDataE, WriteDataM);
-  flopr #(32) pcplus4mreg(clk, reset, PCPlus4E, PCPlus4M);
-  flopr #(5) rdmreg(clk, reset, RdE, RdM);
-  flopr #(1) regwritemreg(clk, reset, RegWriteE, RegWriteM);
-  flopr #(1) memwritemreg(clk, reset, MemWriteE, MemWrite);
-  flopr #(2) resultsrcmreg(clk, reset, ResultSrcE, ResultSrcM);
-  flopr #(32) sl12mreg(clk, reset, SL12E, SL12M);
-  
-  // ========== MEMORY STAGE ==========
-  // Memory read/write handled externally
-  // Data memory output connected to ReadDataM input
-  assign MemReadM = (ResultSrcM == 2'b01);
-  assign MemAccessM = MemWrite | MemReadM;
-  
-  // ========== MEMORY/WRITEBACK PIPELINE REGISTER ==========
-  flopr #(32) aluresultwreg(clk, reset, ALUResultM, ALUResultW);
-  flopr #(32) readdatawreg(clk, reset, ReadDataM, ReadDataW);
-  flopr #(32) pcplus4wreg(clk, reset, PCPlus4M, PCPlus4W);
-  flopr #(5) rdwreg(clk, reset, RdM, RdW);
-  flopr #(1) regwritewreg(clk, reset, RegWriteM, RegWriteW);
-  flopr #(2) resultsrcwreg(clk, reset, ResultSrcM, ResultSrcW);
-  flopr #(32) sl12wreg(clk, reset, SL12M, SL12W);
-  
-  // ========== WRITEBACK STAGE ==========
-  // Result mux
-  mux4 #(32) resultmux(ALUResultW, ReadDataW, PCPlus4W, SL12W, ResultSrcW, ResultW);
-  
-  // ========== HAZARD UNIT ==========
-  hazard hu(Rs1D, Rs2D, Rs1E, Rs2E, RdE, RdM, RdW,
-            PCSrcE, ResultSrcE, MemAccessM, RegWriteM, RegWriteW,
-            ForwardAE, ForwardBE, StallF, StallD, FlushD, FlushE);
-  
+    if ((rs20 != 5'b0) && q20v && (op0 != OP_ADDI) && (op0 != OP_LW) && !nop0) begin
+      s0qkv = 1'b1;
+      s0qk = q20t;
+      s0vk = 32'b0;
+    end else begin
+      s0qkv = 1'b0;
+      s0qk = '0;
+      s0vk = areg[rs20];
+    end
+
+    if ((rs11 != 5'b0) && q11v) begin
+      s1qjv = 1'b1;
+      s1qj = q11t;
+      s1vj = 32'b0;
+    end else begin
+      s1qjv = 1'b0;
+      s1qj = '0;
+      s1vj = areg[rs11];
+    end
+
+    if ((rs21 != 5'b0) && q21v && (op1 != OP_ADDI) && (op1 != OP_LW) && !nop1) begin
+      s1qkv = 1'b1;
+      s1qk = q21t;
+      s1vk = 32'b0;
+    end else begin
+      s1qkv = 1'b0;
+      s1qk = '0;
+      s1vk = areg[rs21];
+    end
+
+    if (regw0 && (rd0 != 5'b0) && !nop0 && iqv0) begin
+      if (rd0 == rs11) begin
+        s1qjv = 1'b1;
+        s1qj = robTag0;
+        s1vj = 32'b0;
+      end
+      if ((op1 != OP_ADDI) && (op1 != OP_LW) && !nop1 && (rd0 == rs21)) begin
+        s1qkv = 1'b1;
+        s1qk = robTag0;
+        s1vk = 32'b0;
+      end
+    end
+
+    dispatch0 = 1'b0;
+    if (iqv0 && valid0) begin
+      if (nop0)
+        dispatch0 = 1'b1;
+      else if (robCanAlloc0) begin
+        case (k0)
+          K_ADD: dispatch0 = !addFull;
+          K_MUL: dispatch0 = !mulFull;
+          K_LS:  dispatch0 = !lsFull;
+          default: dispatch0 = 1'b0;
+        endcase
+      end
+    end
+
+    dispatch1 = 1'b0;
+    // Current RS write path accepts one non-nop dispatch per cycle.
+    // Allow slot1 only when slot0 is nop so instruction stream ordering is preserved.
+    if (iqv1 && valid1 && dispatch0 && nop0) begin
+      if (nop1)
+        dispatch1 = 1'b1;
+      else if (robCanAlloc1) begin
+        case (k1)
+          K_ADD: dispatch1 = !addFull;
+          K_MUL: dispatch1 = !mulFull;
+          K_LS:  dispatch1 = !lsFull;
+          default: dispatch1 = 1'b0;
+        endcase
+      end
+    end
+
+    iqpop = 2'b00;
+    if (dispatch0)
+      iqpop = dispatch1 ? 2'b10 : 2'b01;
+
+    robAlloc0 = dispatch0 && !nop0;
+    robAlloc1 = dispatch1 && !nop1;
+    robAlloc0Store = (op0 == OP_SW);
+    robAlloc1Store = (op1 == OP_SW);
+
+    // Slot1 can allocate by itself when slot0 is a nop.
+    // In that case the allocated ROB entry is current tail (robTag0).
+    robTag1Eff = robAlloc0 ? robTag1 : robTag0;
+
+    rename0 = robAlloc0 && regw0;
+    rename1 = robAlloc1 && regw1;
+
+    addDisp = 1'b0;
+    addDispImm = 1'b0;
+    addDispDest = '0;
+    addDispVj = 32'b0;
+    addDispVk = 32'b0;
+    addDispImmVal = 32'b0;
+    addDispQjv = 1'b0;
+    addDispQj = '0;
+    addDispQkv = 1'b0;
+    addDispQk = '0;
+
+    mulDisp = 1'b0;
+    mulDispDest = '0;
+    mulDispVj = 32'b0;
+    mulDispVk = 32'b0;
+    mulDispQjv = 1'b0;
+    mulDispQj = '0;
+    mulDispQkv = 1'b0;
+    mulDispQk = '0;
+
+    lsDisp = 1'b0;
+    lsDispStore = 1'b0;
+    lsDispDest = '0;
+    lsDispVj = 32'b0;
+    lsDispVk = 32'b0;
+    lsDispImmVal = 32'b0;
+    lsDispQjv = 1'b0;
+    lsDispQj = '0;
+    lsDispQkv = 1'b0;
+    lsDispQk = '0;
+
+    if (robAlloc0) begin
+      case (k0)
+        K_ADD: begin
+          addDisp = 1'b1;
+          addDispImm = (op0 == OP_ADDI);
+          addDispDest = robTag0;
+          addDispVj = s0vj;
+          addDispVk = s0vk;
+          addDispImmVal = imm0;
+          addDispQjv = s0qjv;
+          addDispQj = s0qj;
+          addDispQkv = (op0 == OP_ADDI) ? 1'b0 : s0qkv;
+          addDispQk = s0qk;
+        end
+        K_MUL: begin
+          mulDisp = 1'b1;
+          mulDispDest = robTag0;
+          mulDispVj = s0vj;
+          mulDispVk = s0vk;
+          mulDispQjv = s0qjv;
+          mulDispQj = s0qj;
+          mulDispQkv = s0qkv;
+          mulDispQk = s0qk;
+        end
+        K_LS: begin
+          lsDisp = 1'b1;
+          lsDispStore = (op0 == OP_SW);
+          lsDispDest = robTag0;
+          lsDispVj = s0vj;
+          lsDispVk = s0vk;
+          lsDispImmVal = imm0;
+          lsDispQjv = s0qjv;
+          lsDispQj = s0qj;
+          lsDispQkv = (op0 == OP_SW) ? s0qkv : 1'b0;
+          lsDispQk = s0qk;
+        end
+        default: begin end
+      endcase
+    end else if (robAlloc1) begin
+      case (k1)
+        K_ADD: begin
+          addDisp = 1'b1;
+          addDispImm = (op1 == OP_ADDI);
+          addDispDest = robTag1Eff;
+          addDispVj = s1vj;
+          addDispVk = s1vk;
+          addDispImmVal = imm1;
+          addDispQjv = s1qjv;
+          addDispQj = s1qj;
+          addDispQkv = (op1 == OP_ADDI) ? 1'b0 : s1qkv;
+          addDispQk = s1qk;
+        end
+        K_MUL: begin
+          mulDisp = 1'b1;
+          mulDispDest = robTag1Eff;
+          mulDispVj = s1vj;
+          mulDispVk = s1vk;
+          mulDispQjv = s1qjv;
+          mulDispQj = s1qj;
+          mulDispQkv = s1qkv;
+          mulDispQk = s1qk;
+        end
+        K_LS: begin
+          lsDisp = 1'b1;
+          lsDispStore = (op1 == OP_SW);
+          lsDispDest = robTag1Eff;
+          lsDispVj = s1vj;
+          lsDispVk = s1vk;
+          lsDispImmVal = imm1;
+          lsDispQjv = s1qjv;
+          lsDispQj = s1qj;
+          lsDispQkv = (op1 == OP_SW) ? s1qkv : 1'b0;
+          lsDispQk = s1qk;
+        end
+        default: begin end
+      endcase
+    end
+
+    MemReadM = loadDoneV;
+
+    // In this simplified core, perform memory writes when LSU store completes.
+    // This avoids load/read vs. commit-store write conflicts on single-port RAM.
+    MemWrite = storeDoneV;
+    ALUResultM = MemWrite ? storeDoneAddr : loadAddr;
+    WriteDataM = MemWrite ? storeDoneData : 32'b0;
+  end
+
+  always_ff @(posedge clk or posedge reset) begin
+    if (reset) begin
+      for (i = 0; i < 32; i = i + 1)
+        areg[i] <= 32'b0;
+    end else begin
+      areg[0] <= 32'b0;
+      if (commitv && !commitStore && (commitRd != 5'b0))
+        areg[commitRd] <= commitVal;
+    end
+  end
+
 endmodule

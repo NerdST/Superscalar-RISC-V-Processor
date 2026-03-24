@@ -132,7 +132,7 @@ def assemble_instruction(instr_text, labels, pc, line_no):
     if op == 'nop':
         return 0x00000013
 
-    if op in ('add', 'sub', 'and', 'or', 'xor', 'sll', 'srl', 'sra', 'slt', 'sltu'):
+    if op in ('add', 'sub', 'and', 'or', 'xor', 'sll', 'srl', 'sra', 'slt', 'sltu', 'mul'):
         if len(tokens) != 4:
             raise ValueError(f"Invalid R-type format on line {line_no}: {instr_text}")
         rd = parse_reg(tokens[1])
@@ -141,7 +141,7 @@ def assemble_instruction(instr_text, labels, pc, line_no):
         r_map = {
             'add': (0x00, 0x0), 'sub': (0x20, 0x0), 'and': (0x00, 0x7), 'or': (0x00, 0x6),
             'xor': (0x00, 0x4), 'sll': (0x00, 0x1), 'srl': (0x00, 0x5), 'sra': (0x20, 0x5),
-            'slt': (0x00, 0x2), 'sltu': (0x00, 0x3)
+            'slt': (0x00, 0x2), 'sltu': (0x00, 0x3), 'mul': (0x01, 0x0)
         }
         funct7, funct3 = r_map[op]
         return encode_r(funct7, rs2, rs1, funct3, rd, 0x33)

@@ -9,14 +9,18 @@ module mem(input  logic        clk,
 
   logic [31:0] RAM[4095:0];
   logic        memAccessM;
+  logic [11:0] pcWord;
+  logic [11:0] dataWord;
 
   assign memAccessM = memReadM | memWriteM;
+  assign pcWord = pcAddrF[13:2];
+  assign dataWord = dataAddrM[13:2];
 
 // synthesis translate_off
   string mem_file;
 initial begin
   if (!$value$plusargs("MEM=%s", mem_file))
-    mem_file = "../../tests/riscvtest01_addi_smoke.mem";
+    mem_file = "../../tests/tomasulo01_addi_smoke.mem";
   $display("[mem] loading image: %s", mem_file);
 $display("Current directory:");
   $system("pwd");
@@ -30,12 +34,12 @@ end
     readDataM = 32'b0;
 
     if (memAccessM) begin
-      readDataM = RAM[dataAddrM[31:2]];
+      readDataM = RAM[dataWord];
     end else begin
-      instrF = RAM[pcAddrF[31:2]];
+      instrF = RAM[pcWord];
     end
   end
 
   always_ff @(posedge clk)
-    if (memWriteM) RAM[dataAddrM[31:2]] <= writeDataM;
+    if (memWriteM) RAM[dataWord] <= writeDataM;
 endmodule
