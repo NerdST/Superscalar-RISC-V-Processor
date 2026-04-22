@@ -23,6 +23,7 @@ incremental_db/
 work/
 simulation/work/
 simulation/modelsim/
+simulation/verilog_libs/
 *.wlf
 transcript
 simulation/transcript
@@ -47,3 +48,7 @@ simulation/cache_coherence.cr.mti
 # simulation venv
 tests/.venv/
 tests/test_runner.py
+project2.zip
+architecture_diagram.html
+architecture-diagrams.md
+report/diagram/*

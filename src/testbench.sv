@@ -1,11 +1,16 @@
 module testbench();
 
+/* verilator lint_off BLKSEQ */
+/* verilator lint_off SYNCASYNCNET */
+
   logic clk;
   logic reset;
 
   logic [31:0] WriteData;
   logic [31:0] DataAdr;
   logic        MemWrite;
+  logic        trap;
+  logic [31:0] trapPC;
   int unsigned cycle_count;
   int unsigned max_cycles;
   string test_name;
@@ -16,7 +21,9 @@ module testbench();
       .reset(reset),
       .WriteDataM(WriteData),
       .DataAdrM(DataAdr),
-      .MemWriteM(MemWrite)
+      .MemWriteM(MemWrite),
+      .trap(trap),
+      .trapPC(trapPC)
   );
 
   initial begin
@@ -47,19 +54,19 @@ module testbench();
 
   always @(negedge clk) begin
     if (debug_en != 0 && !reset && cycle_count < 180) begin
-      $display("DBG c=%0d PC=%08x i0=%08x i1=%08x d0=%0d d1=%0d cdb=%0d t=%0d cv=%0d ct=%0d cs=%0d sd=%0d mw=%0d adr=%0d wd=%0d",
+      $display("DBG c=%0d PC=%08x i0=%08x i1=%08x d0=%0d d1=%0d cdb=%0d t=%0d wbv=%0d wbt=%0d wbs=%0d sd=%0d mw=%0d adr=%0d wd=%0d",
                cycle_count,
                dut.riscvprocessor.PCF,
-               dut.riscvprocessor.iq0,
-               dut.riscvprocessor.iq1,
-               dut.riscvprocessor.dispatch0,
-               dut.riscvprocessor.dispatch1,
-               dut.riscvprocessor.cdbv,
-               dut.riscvprocessor.cdbt,
-               dut.riscvprocessor.commitv,
-               dut.riscvprocessor.commitTag,
-               dut.riscvprocessor.commitStore,
-               dut.riscvprocessor.storeDoneV,
+             dut.riscvprocessor.dp.iq0,
+             dut.riscvprocessor.dp.iq1,
+             dut.riscvprocessor.dp.dispatch0Dbg,
+             dut.riscvprocessor.dp.dispatch1Dbg,
+             dut.riscvprocessor.dp.cdbvDbg,
+             dut.riscvprocessor.dp.cdbtDbg,
+             dut.riscvprocessor.dp.wbvDbg,
+             dut.riscvprocessor.dp.wbtDbg,
+             dut.riscvprocessor.dp.wbStoreDbg,
+             dut.riscvprocessor.dp.storeDoneDbg,
                MemWrite,
                DataAdr,
                WriteData);
@@ -74,6 +81,14 @@ module testbench();
       $display("FINAL_SIGNATURE: DataAdr=%0d WriteData=%0d", DataAdr, WriteData);
       $stop;
     end
+
+    if (trap) begin
+      $display("TRAP_SIGNATURE: trapPC=%0d", trapPC);
+      $stop;
+    end
   end
 
 endmodule
+
+/* verilator lint_on SYNCASYNCNET */
+/* verilator lint_on BLKSEQ */

@@ -6,6 +6,7 @@ module rs #(
 )(
     input  logic            clk,
     input  logic            reset,
+    input  logic            flush,   // pipeline flush — clear all entries
     input  logic            disp,
     input  logic            dispStore,
     input  logic            dispImm,
@@ -21,6 +22,7 @@ module rs #(
     input  logic            cdbv,
     input  logic [TAGW-1:0] cdbt,
     input  logic [31:0]     cdbr,
+    input  logic            issueReady,
     output logic            issuev,
     output logic            issueStore,
     output logic            issueImm,
@@ -39,7 +41,6 @@ module rs #(
   logic [TAGW-1:0] qj[DEPTH-1:0], qk[DEPTH-1:0];
 
   int ic;
-  int is;
   int freei;
   int issuei;
 
@@ -60,16 +61,24 @@ module rs #(
         freei = ic;
 
     if (INORDER) begin
+      // In-order stations issue from the oldest busy entry only.
       for (ic = 0; ic < DEPTH; ic = ic + 1) begin
         if (busy[ic] && (issuei < 0)) begin
           issuei = ic;
-          if (!qjv[ic] && !qkv[ic])
+          if (!qjv[ic] && !qkv[ic] && issueReady) begin
             issuev = 1'b1;
+            issueStore = st[ic];
+            issueImm = imm[ic];
+            issueDest = dest[ic];
+            issueA = vj[ic];
+            issueB = vk[ic];
+            issueImmVal = imv[ic];
+          end
         end
       end
     end else begin
       for (ic = 0; ic < DEPTH; ic = ic + 1)
-        if (busy[ic] && !qjv[ic] && !qkv[ic] && !issuev) begin
+        if (busy[ic] && !qjv[ic] && !qkv[ic] && issueReady && !issuev) begin
           issuev = 1'b1;
           issuei = ic;
         end
@@ -89,48 +98,64 @@ module rs #(
 
   always_ff @(posedge clk or posedge reset) begin
     if (reset) begin
-      for (is = 0; is < DEPTH; is = is + 1) begin
-        busy[is] <= 1'b0;
-        st[is] <= 1'b0;
-        imm[is] <= 1'b0;
-        dest[is] <= '0;
-        vj[is] <= 32'b0;
-        vk[is] <= 32'b0;
-        imv[is] <= 32'b0;
-        qjv[is] <= 1'b0;
-        qkv[is] <= 1'b0;
-        qj[is] <= '0;
-        qk[is] <= '0;
+      for (int j = 0; j < DEPTH; j = j + 1) begin
+        busy[j] <= 1'b0;
+        st[j] <= 1'b0;
+        imm[j] <= 1'b0;
+        dest[j] <= '0;
+        vj[j] <= 32'b0;
+        vk[j] <= 32'b0;
+        imv[j] <= 32'b0;
+        qjv[j] <= 1'b0;
+        qkv[j] <= 1'b0;
+        qj[j] <= '0;
+        qk[j] <= '0;
       end
     end else begin
-      if (cdbv) begin
-        for (is = 0; is < DEPTH; is = is + 1) begin
-          if (busy[is] && qjv[is] && (qj[is] == cdbt)) begin
-            qjv[is] <= 1'b0;
-            vj[is] <= cdbr;
-          end
-          if (busy[is] && qkv[is] && (qk[is] == cdbt)) begin
-            qkv[is] <= 1'b0;
-            vk[is] <= cdbr;
+      if (flush) begin
+        for (int j = 0; j < DEPTH; j = j + 1) begin
+          busy[j] <= 1'b0;
+          st[j] <= 1'b0;
+          imm[j] <= 1'b0;
+          dest[j] <= '0;
+          vj[j] <= 32'b0;
+          vk[j] <= 32'b0;
+          imv[j] <= 32'b0;
+          qjv[j] <= 1'b0;
+          qkv[j] <= 1'b0;
+          qj[j] <= '0;
+          qk[j] <= '0;
+        end
+      end else begin
+        if (cdbv) begin
+          for (int j = 0; j < DEPTH; j = j + 1) begin
+            if (busy[j] && qjv[j] && (qj[j] == cdbt)) begin
+              qjv[j] <= 1'b0;
+              vj[j] <= cdbr;
+            end
+            if (busy[j] && qkv[j] && (qk[j] == cdbt)) begin
+              qkv[j] <= 1'b0;
+              vk[j] <= cdbr;
+            end
           end
         end
-      end
 
-      if (issuev)
-        busy[issuei] <= 1'b0;
+        if (issuev)
+          busy[issuei] <= 1'b0;
 
-      if (disp && !full) begin
-        busy[freei] <= 1'b1;
-        st[freei] <= dispStore;
-        imm[freei] <= dispImm;
-        dest[freei] <= dispDest;
-        vj[freei] <= dispVj;
-        vk[freei] <= dispVk;
-        imv[freei] <= dispImmVal;
-        qjv[freei] <= dispQjv;
-        qkv[freei] <= dispQkv;
-        qj[freei] <= dispQj;
-        qk[freei] <= dispQk;
+        if (disp && !full) begin
+          busy[freei] <= 1'b1;
+          st[freei] <= dispStore;
+          imm[freei] <= dispImm;
+          dest[freei] <= dispDest;
+          vj[freei] <= dispVj;
+          vk[freei] <= dispVk;
+          imv[freei] <= dispImmVal;
+          qjv[freei] <= dispQjv;
+          qkv[freei] <= dispQkv;
+          qj[freei] <= dispQj;
+          qk[freei] <= dispQk;
+        end
       end
     end
   end

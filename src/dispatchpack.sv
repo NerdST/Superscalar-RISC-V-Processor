@@ -5,6 +5,7 @@ module dispatchpack #(
     input  logic [2:0]      op,
     input  logic [1:0]      kind,
     input  logic            isStore,
+    input  logic            isBranch,
     input  logic [TAGW-1:0] destTag,
     input  logic [31:0]     vj,
     input  logic [31:0]     vk,
@@ -13,112 +14,59 @@ module dispatchpack #(
     input  logic [TAGW-1:0] qj,
     input  logic            qkv,
     input  logic [TAGW-1:0] qk,
-    output logic            addDisp,
-    output logic            addDispImm,
-    output logic [TAGW-1:0] addDispDest,
-    output logic [31:0]     addDispVj,
-    output logic [31:0]     addDispVk,
-    output logic [31:0]     addDispImmVal,
-    output logic            addDispQjv,
-    output logic [TAGW-1:0] addDispQj,
-    output logic            addDispQkv,
-    output logic [TAGW-1:0] addDispQk,
-    output logic            mulDisp,
-    output logic [TAGW-1:0] mulDispDest,
-    output logic [31:0]     mulDispVj,
-    output logic [31:0]     mulDispVk,
-    output logic            mulDispQjv,
-    output logic [TAGW-1:0] mulDispQj,
-    output logic            mulDispQkv,
-    output logic [TAGW-1:0] mulDispQk,
-    output logic            lsDisp,
-    output logic            lsDispStore,
-    output logic [TAGW-1:0] lsDispDest,
-    output logic [31:0]     lsDispVj,
-    output logic [31:0]     lsDispVk,
-    output logic [31:0]     lsDispImmVal,
-    output logic            lsDispQjv,
-    output logic [TAGW-1:0] lsDispQj,
-    output logic            lsDispQkv,
-    output logic [TAGW-1:0] lsDispQk
+    output logic            disp,
+    output logic [1:0]      dispKind,
+    output logic            dispStore,
+    output logic            dispImm,
+    output logic [TAGW-1:0] dispDest,
+    output logic [31:0]     dispVj,
+    output logic [31:0]     dispVk,
+    output logic [31:0]     dispImmVal,
+    output logic            dispQjv,
+    output logic [TAGW-1:0] dispQj,
+    output logic            dispQkv,
+    output logic [TAGW-1:0] dispQk
 );
 
   localparam logic [1:0] KADD = 2'd0;
-  localparam logic [1:0] KMUL = 2'd1;
   localparam logic [1:0] KLS  = 2'd2;
 
   localparam logic [2:0] OPADDI = 3'd2;
 
   always_comb begin
-    addDisp = 1'b0;
-    addDispImm = 1'b0;
-    addDispDest = '0;
-    addDispVj = 32'b0;
-    addDispVk = 32'b0;
-    addDispImmVal = 32'b0;
-    addDispQjv = 1'b0;
-    addDispQj = '0;
-    addDispQkv = 1'b0;
-    addDispQk = '0;
-
-    mulDisp = 1'b0;
-    mulDispDest = '0;
-    mulDispVj = 32'b0;
-    mulDispVk = 32'b0;
-    mulDispQjv = 1'b0;
-    mulDispQj = '0;
-    mulDispQkv = 1'b0;
-    mulDispQk = '0;
-
-    lsDisp = 1'b0;
-    lsDispStore = 1'b0;
-    lsDispDest = '0;
-    lsDispVj = 32'b0;
-    lsDispVk = 32'b0;
-    lsDispImmVal = 32'b0;
-    lsDispQjv = 1'b0;
-    lsDispQj = '0;
-    lsDispQkv = 1'b0;
-    lsDispQk = '0;
+    disp = 1'b0;
+    dispKind = KADD;
+    dispStore = 1'b0;
+    dispImm = 1'b0;
+    dispDest = '0;
+    dispVj = 32'b0;
+    dispVk = 32'b0;
+    dispImmVal = 32'b0;
+    dispQjv = 1'b0;
+    dispQj = '0;
+    dispQkv = 1'b0;
+    dispQk = '0;
 
     if (en) begin
-      case (kind)
-        KADD: begin
-          addDisp = 1'b1;
-          addDispImm = (op == OPADDI);
-          addDispDest = destTag;
-          addDispVj = vj;
-          addDispVk = vk;
-          addDispImmVal = imm;
-          addDispQjv = qjv;
-          addDispQj = qj;
-          addDispQkv = (op == OPADDI) ? 1'b0 : qkv;
-          addDispQk = qk;
-        end
-        KMUL: begin
-          mulDisp = 1'b1;
-          mulDispDest = destTag;
-          mulDispVj = vj;
-          mulDispVk = vk;
-          mulDispQjv = qjv;
-          mulDispQj = qj;
-          mulDispQkv = qkv;
-          mulDispQk = qk;
-        end
-        KLS: begin
-          lsDisp = 1'b1;
-          lsDispStore = isStore;
-          lsDispDest = destTag;
-          lsDispVj = vj;
-          lsDispVk = vk;
-          lsDispImmVal = imm;
-          lsDispQjv = qjv;
-          lsDispQj = qj;
-          lsDispQkv = isStore ? qkv : 1'b0;
-          lsDispQk = qk;
-        end
-        default: begin end
-      endcase
+      disp = 1'b1;
+      dispKind = kind;
+      // For ADD FU: repurpose dispStore as isBranch flag (ADD RS's st[] bit)
+      // For LS FU:  dispStore = isStore as before
+      dispStore = (kind == KLS) ? isStore : (kind == KADD) ? isBranch : 1'b0;
+      dispImm = ((kind == KADD) && (op == OPADDI)) || (kind == KLS);
+      dispDest = destTag;
+      dispVj = vj;
+      dispVk = vk;
+      dispImmVal = imm;
+      dispQjv = qjv;
+      dispQj = qj;
+      if ((kind == KADD) && (op == OPADDI))
+        dispQkv = 1'b0;
+      else if ((kind == KLS) && !isStore)
+        dispQkv = 1'b0;
+      else
+        dispQkv = qkv;
+      dispQk = qk;
     end
   end
 

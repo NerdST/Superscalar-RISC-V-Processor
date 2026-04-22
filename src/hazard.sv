@@ -1,3 +1,5 @@
+// Hazard and structural gating for 2-slot dispatch.
+// Also injects same-cycle slot0->slot1 RAW tags.
 module hazard #(
     parameter int TAGW = 3
 )(
@@ -25,7 +27,7 @@ module hazard #(
     input  logic [TAGW-1:0] q11t,
     input  logic            q21v,
     input  logic [TAGW-1:0] q21t,
-    input  logic [TAGW-1:0] robTag0,
+    input  logic [TAGW-1:0] slot0Tag,
     input  logic [31:0]     rs10Val,
     input  logic [31:0]     rs20Val,
     input  logic [31:0]     rs11Val,
@@ -113,12 +115,12 @@ module hazard #(
     if (regw0 && (rd0 != 5'b0) && !nop0 && dispatch0) begin
       if (rd0 == rs11) begin
         s1qjv = 1'b1;
-        s1qj = robTag0;
+        s1qj = slot0Tag;
         s1vj = 32'b0;
       end
       if ((op1 != OPADDI) && (op1 != OPLW) && !nop1 && (rd0 == rs21)) begin
         s1qkv = 1'b1;
-        s1qk = robTag0;
+        s1qk = slot0Tag;
         s1vk = 32'b0;
       end
     end

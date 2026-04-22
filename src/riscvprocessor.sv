@@ -7,17 +7,22 @@ module riscvprocessor(
     output logic [31:0] WriteData,
     input  logic [31:0] ReadData,
     output logic        MemReadM,
-    output logic [31:0] iq0,
-    output logic [31:0] iq1,
-    output logic        dispatch0,
-    output logic        dispatch1,
-    output logic        cdbv,
-    output logic [2:0]  cdbt,
-    output logic        commitv,
-    output logic [2:0]  commitTag,
-    output logic        commitStore,
-    output logic        storeDoneV
+    output logic        trap,
+    output logic [31:0] trapPC
 );
+
+/* verilator lint_off UNUSEDSIGNAL */
+  logic [31:0] iq0Tap;
+  logic [31:0] iq1Tap;
+  logic        dispatch0Tap;
+  logic        dispatch1Tap;
+  logic        cdbvTap;
+  logic [2:0]  cdbtTap;
+  logic        wbvTap;
+  logic [2:0]  wbtTap;
+  logic        wbStoreTap;
+  logic        storeDoneTap;
+/* verilator lint_on UNUSEDSIGNAL */
 
   datapath dp(
       .clk(clk),
@@ -28,16 +33,18 @@ module riscvprocessor(
       .WriteDataM(WriteData),
       .MemWrite(MemWrite),
       .MemReadM(MemReadM),
-      .iq0(iq0),
-      .iq1(iq1),
-      .dispatch0Dbg(dispatch0),
-      .dispatch1Dbg(dispatch1),
-      .cdbvDbg(cdbv),
-      .cdbtDbg(cdbt),
-      .commitvDbg(commitv),
-      .commitTagDbg(commitTag),
-      .commitStoreDbg(commitStore),
-      .storeDoneDbg(storeDoneV)
+        .iq0(iq0Tap),
+        .iq1(iq1Tap),
+        .dispatch0Dbg(dispatch0Tap),
+        .dispatch1Dbg(dispatch1Tap),
+        .cdbvDbg(cdbvTap),
+        .cdbtDbg(cdbtTap),
+        .wbvDbg(wbvTap),
+        .wbtDbg(wbtTap),
+        .wbStoreDbg(wbStoreTap),
+        .storeDoneDbg(storeDoneTap),
+        .trap(trap),
+        .trapPC(trapPC)
   );
 
 endmodule
